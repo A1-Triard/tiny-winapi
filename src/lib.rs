@@ -100,6 +100,7 @@ impl<'a> Drop for WindowClass<'a> {
 pub struct Window<'a, 'b, Data> {
     h_wnd: NonNull<HWND__>,
     data: PhantomType<Data>,
+    #[educe(PartialOrd(ignore), Ord(ignore), PartialEq(ignore), Eq(ignore), Hash(ignore))]
     class: &'a WindowClass<'b>
 }
 
