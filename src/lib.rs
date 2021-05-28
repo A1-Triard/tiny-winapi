@@ -2,19 +2,17 @@
 #![deny(warnings)]
 
 use educe::Educe;
-use memoffset::offset_of;
 use null_terminated::Nul;
 use phantom_type::PhantomType;
 use std::io::{self};
-use std::mem::{MaybeUninit, forget, size_of};
+use std::mem::{MaybeUninit, forget};
 use std::os::raw::{NonZero_c_ushort, c_int};
-use std::ptr::{self, null, null_mut, NonNull};
-use winapi::shared::minwindef::{HINSTANCE__, HINSTANCE, UINT, WPARAM, LPARAM, LRESULT, LPVOID, DWORD};
+use std::ptr::{null, null_mut, NonNull};
+use winapi::shared::minwindef::{HINSTANCE__, UINT, WPARAM, LPARAM, LRESULT, LPVOID};
 use winapi::shared::windef::{HBRUSH, HWND, HWND__};
 use winapi::um::libloaderapi::GetModuleHandleW;
-use winapi::um::winuser::{LoadIconW, LoadCursorW, IDI_APPLICATION, IDC_ARROW, COLOR_WINDOW, RegisterClassW, WNDCLASSW, CS_HREDRAW, CS_VREDRAW, PostQuitMessage, DefWindowProcW, WM_DESTROY, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, HWND_DESKTOP, CreateWindowExW, SW_SHOWDEFAULT, ShowWindow, GetMessageW, TranslateMessage, DispatchMessageW, UnregisterClassW, GetWindowInfo, WINDOWINFO, GetWindowLongPtrW, GWLP_HINSTANCE};
+use winapi::um::winuser::{LoadIconW, LoadCursorW, IDI_APPLICATION, IDC_ARROW, COLOR_WINDOW, RegisterClassW, WNDCLASSW, CS_HREDRAW, CS_VREDRAW, PostQuitMessage, DefWindowProcW, WM_DESTROY, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, HWND_DESKTOP, CreateWindowExW, SW_SHOWDEFAULT, ShowWindow, GetMessageW, TranslateMessage, DispatchMessageW, UnregisterClassW};
 use winapi::um::winnt::LPCWSTR;
-use std::marker::PhantomData;
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct Instance(NonNull<HINSTANCE__>);
@@ -122,24 +120,12 @@ impl<'a, 'b, Data> Window<'a, 'b, Data> {
 
     pub fn as_h_wnd(&self) -> NonNull<HWND__> { self.h_wnd }
 
-    pub fn class(&self) -> &'a WindowClass<'b> {
-        let mut window_info = MaybeUninit::uninit();
-        unsafe { ptr::write(
-            (window_info.as_mut_ptr() as *mut ()).offset(offset_of!(WINDOWINFO, cbSize) as isize) as *mut DWORD,
-            size_of::<WINDOWINFO>() as _
-        ); }
-        let ok = unsafe { GetWindowInfo(self.h_wnd.as_ptr(), window_info.as_mut_ptr()) };
-        assert_ne!(ok, 0);
-        let window_info = unsafe { window_info.assume_init() };
-        let atom = NonZero_ATOM::new(window_info.atomWindowType).expect("Non-zero window type ATOM");
-        let h_instance = NonNull::new(unsafe { GetWindowLongPtrW(self.h_wnd.as_ptr(), GWLP_HINSTANCE) } as HINSTANCE).expect("Non-null HINSTANCE");
-        unsafe { &WindowClass::from_raw(atom, &Instance::from_raw(h_instance)) }
-    }
+    pub fn class(&self) -> &'a WindowClass<'b> { self.class }
 
-    pub fn new(name: &Nul<u16>, class: WindowClass, data: Data) -> io::Result<Window<'a, 'b, Data>> {
+    pub fn new(name: &Nul<u16>, class: &'a WindowClass<'b>, data: Data) -> io::Result<Window<'a, 'b, Data>> {
         let h_wnd = unsafe { CreateWindowExW(
             0,
-            class.into_raw().get() as usize as LPCWSTR,
+            class.as_atom().get() as usize as LPCWSTR,
             name.as_ptr(),
             WS_OVERLAPPEDWINDOW,
             CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
@@ -148,7 +134,7 @@ impl<'a, 'b, Data> Window<'a, 'b, Data> {
             class.instance().as_handle().as_ptr(),
             Box::into_raw(Box::new(data)) as LPVOID
         ) };
-        NonNull::new(h_wnd).ok_or_else(io::Error::last_os_error).map(|h_wnd| Window { h_wnd, data: PhantomType::new(), class: PhantomData })
+        NonNull::new(h_wnd).ok_or_else(io::Error::last_os_error).map(|h_wnd| Window { h_wnd, data: PhantomType::new(), class })
     }
 
     pub fn show(self) -> bool {
