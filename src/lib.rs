@@ -11,7 +11,7 @@ use std::ptr::{null, null_mut, NonNull};
 use winapi::shared::minwindef::{HINSTANCE__, UINT, WPARAM, LPARAM, LRESULT, LPVOID};
 use winapi::shared::windef::{HBRUSH, HWND, HWND__};
 use winapi::um::libloaderapi::GetModuleHandleW;
-use winapi::um::winuser::{LoadIconW, LoadCursorW, IDI_APPLICATION, IDC_ARROW, COLOR_WINDOW, RegisterClassW, WNDCLASSW, CS_HREDRAW, CS_VREDRAW, PostQuitMessage, DefWindowProcW, WM_DESTROY, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, HWND_DESKTOP, CreateWindowExW, SW_SHOWDEFAULT, ShowWindow, GetMessageW, TranslateMessage, DispatchMessageW, UnregisterClassW};
+use winapi::um::winuser::{LoadIconW, LoadCursorW, IDI_APPLICATION, IDC_ARROW, COLOR_WINDOW, RegisterClassW, WNDCLASSW, CS_HREDRAW, CS_VREDRAW, PostQuitMessage, DefWindowProcW, WM_DESTROY, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, HWND_DESKTOP, CreateWindowExW, SW_SHOWDEFAULT, ShowWindow, GetMessageW, TranslateMessage, DispatchMessageW, UnregisterClassW, DestroyWindow};
 use winapi::um::winnt::LPCWSTR;
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
@@ -91,7 +91,7 @@ impl<'a> WindowClass<'a> {
 impl<'a> Drop for WindowClass<'a> {
     fn drop(&mut self) {
         let ok = unsafe { UnregisterClassW(self.atom.get() as usize as LPCWSTR, self.instance.as_handle().as_ptr()) };
-        assert_ne!(ok, 0);
+        assert_ne!(ok, 0, "UnregisterClassW failed");
     }
 }
 
@@ -140,6 +140,13 @@ impl<'a, 'b, Data> Window<'a, 'b, Data> {
 
     pub fn show(self) -> bool {
         unsafe { ShowWindow(self.h_wnd.as_ptr(), SW_SHOWDEFAULT) != 0 }
+    }
+}
+
+impl<'a, 'b, Data> Drop for Window<'a, 'b, Data> {
+    fn drop(&mut self) {
+        let ok = unsafe { DestroyWindow(self.h_wnd.as_ptr()) };
+        assert_ne!(ok, 0, "DestroyWindow failed");
     }
 }
 
