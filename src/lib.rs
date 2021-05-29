@@ -3,31 +3,21 @@
 
 use educe::Educe;
 use null_terminated::Nul;
-use phantom_type::PhantomType;
 use std::io::{self};
-use std::mem::{MaybeUninit, forget};
+use std::mem::{MaybeUninit};
 use std::os::raw::{NonZero_c_ushort, c_int};
 use std::ptr::{null, null_mut, NonNull};
-use winapi::shared::minwindef::{HINSTANCE__, UINT, WPARAM, LPARAM, LRESULT, LPVOID};
+use winapi::shared::basetsd::LONG_PTR;
+use winapi::shared::minwindef::{HINSTANCE__, UINT, WPARAM, LPARAM, LRESULT, LPVOID, TRUE};
 use winapi::shared::windef::{HBRUSH, HWND, HWND__};
 use winapi::um::libloaderapi::GetModuleHandleW;
-use winapi::um::winuser::{LoadIconW, LoadCursorW, IDI_APPLICATION, IDC_ARROW, COLOR_WINDOW, RegisterClassW, WNDCLASSW, CS_HREDRAW, CS_VREDRAW, PostQuitMessage, DefWindowProcW, WM_DESTROY, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, HWND_DESKTOP, CreateWindowExW, SW_SHOWDEFAULT, ShowWindow, GetMessageW, TranslateMessage, DispatchMessageW, UnregisterClassW, DestroyWindow};
+use winapi::um::winuser::{LoadIconW, LoadCursorW, IDI_APPLICATION, IDC_ARROW, COLOR_WINDOW, RegisterClassW, WNDCLASSW, CS_HREDRAW, CS_VREDRAW, PostQuitMessage, DefWindowProcW, WM_DESTROY, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, HWND_DESKTOP, CreateWindowExW, SW_SHOWDEFAULT, ShowWindow, GetMessageW, TranslateMessage, DispatchMessageW, UnregisterClassW, DestroyWindow, WM_NCCREATE, CREATESTRUCTW, SetWindowLongPtrW, GWLP_USERDATA, GetWindowLongPtrW};
 use winapi::um::winnt::LPCWSTR;
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct Instance(NonNull<HINSTANCE__>);
 
 impl Instance {
-    pub unsafe fn from_raw(h_instance: NonNull<HINSTANCE__>) -> Instance {
-        Instance(h_instance)
-    }
-
-    pub fn into_raw(self) -> NonNull<HINSTANCE__> {
-        let raw = self.0;
-        forget(self);
-        raw
-    }
-
     pub fn as_handle(&self) -> NonNull<HINSTANCE__> { self.0 }
 
     pub fn current_executable() -> io::Result<Instance> {
@@ -44,6 +34,10 @@ impl Instance {
             msg.assume_init().wParam as _
         }
     }
+
+    pub fn post_quit_message(exit_code: c_int) {
+        unsafe { PostQuitMessage(exit_code) }
+    }
 }
 
 #[allow(non_camel_case_types)]
@@ -56,16 +50,6 @@ pub struct WindowClass<'a> {
 }
 
 impl<'a> WindowClass<'a> {
-    pub unsafe fn from_raw(atom: NonZero_ATOM, instance: &'a Instance) -> WindowClass {
-        WindowClass { atom, instance }
-    }
-
-    pub fn into_raw(self) -> NonZero_ATOM {
-        let atom = self.atom;
-        forget(self);
-        atom
-    }
-
     pub fn as_atom(&self) -> NonZero_ATOM { self.atom }
 
     pub fn instance(&self) -> &'a Instance { self.instance }
@@ -95,35 +79,24 @@ impl<'a> Drop for WindowClass<'a> {
     }
 }
 
+pub trait WindowImpl {
+    fn destroy(&self, handled: &mut bool) { *handled = false; }
+}
+
 #[derive(Educe)]
 #[educe(Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct Window<'a, 'b, Data> {
+pub struct Window<'a, 'b> {
     h_wnd: NonNull<HWND__>,
-    data: PhantomType<Data>,
     #[educe(PartialOrd(ignore), Ord(ignore), PartialEq(ignore), Eq(ignore), Hash(ignore))]
     class: &'a WindowClass<'b>
 }
 
-impl<'a, 'b, Data> Window<'a, 'b, Data> {
-    pub unsafe fn from_raw(h_wnd: NonNull<HWND__>, class: &'a WindowClass<'b>) -> Window<'a, 'b, Data> {
-        Window {
-            h_wnd,
-            data: PhantomType::new(),
-            class
-        }
-    }
-
-    pub fn into_raw(self) -> NonNull<HWND__> {
-        let h_wnd = self.h_wnd;
-        forget(self);
-        h_wnd
-    }
-
+impl<'a, 'b> Window<'a, 'b> {
     pub fn as_h_wnd(&self) -> NonNull<HWND__> { self.h_wnd }
 
     pub fn class(&self) -> &'a WindowClass<'b> { self.class }
 
-    pub fn new(name: &Nul<u16>, class: &'a WindowClass<'b>, data: Data) -> io::Result<Window<'a, 'b, Data>> {
+    pub fn new(name: &Nul<u16>, class: &'a WindowClass<'b>, w_impl: Box<dyn WindowImpl>) -> io::Result<Window<'a, 'b>> {
         let h_wnd = unsafe { CreateWindowExW(
             0,
             class.as_atom().get() as usize as LPCWSTR,
@@ -133,31 +106,41 @@ impl<'a, 'b, Data> Window<'a, 'b, Data> {
             HWND_DESKTOP,
             null_mut(),
             class.instance().as_handle().as_ptr(),
-            Box::into_raw(Box::new(data)) as LPVOID
+            Box::into_raw(Box::new(w_impl)) as LPVOID
         ) };
-        NonNull::new(h_wnd).ok_or_else(io::Error::last_os_error).map(|h_wnd| Window { h_wnd, data: PhantomType::new(), class })
+        NonNull::new(h_wnd).ok_or_else(io::Error::last_os_error).map(|h_wnd| Window { h_wnd, class })
     }
 
-    pub fn show(self) -> bool {
+    pub fn show(&self) -> bool {
         unsafe { ShowWindow(self.h_wnd.as_ptr(), SW_SHOWDEFAULT) != 0 }
     }
 }
 
-impl<'a, 'b, Data> Drop for Window<'a, 'b, Data> {
+impl<'a, 'b> Drop for Window<'a, 'b> {
     fn drop(&mut self) {
+        let w_impl = unsafe { GetWindowLongPtrW(self.h_wnd.as_ptr(), GWLP_USERDATA) as *mut Box<dyn WindowImpl> };
         let ok = unsafe { DestroyWindow(self.h_wnd.as_ptr()) };
         assert_ne!(ok, 0, "DestroyWindow failed");
+        unsafe { Box::from_raw(w_impl) };
     }
 }
 
 unsafe extern "system" fn wnd_proc(h_wnd: HWND, message: UINT, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
+    if message == WM_NCCREATE {
+        let create_struct = l_param as *const CREATESTRUCTW;
+        SetWindowLongPtrW(h_wnd, GWLP_USERDATA, (*create_struct).lpCreateParams as LONG_PTR);
+        return TRUE as LRESULT;
+    }
+    let w_impl = &*(GetWindowLongPtrW(h_wnd, GWLP_USERDATA) as *mut Box<dyn WindowImpl>);
     match message {
         WM_DESTROY => {
-            PostQuitMessage(0);
-            0
+            let mut handled = true;
+            w_impl.destroy(&mut handled);
+            if handled { return 0; }
         },
-        _ => DefWindowProcW(h_wnd, message, w_param, l_param),
+        _ => { },
     }
+    DefWindowProcW(h_wnd, message, w_param, l_param)
 }
 
 #[cfg(test)]
