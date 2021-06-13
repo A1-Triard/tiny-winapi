@@ -45,17 +45,17 @@ impl Instance {
 pub type NonZero_ATOM = NonZero_c_ushort;
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct WindowClass<'a> {
+pub struct Class<'a> {
     atom: NonZero_ATOM,
     instance: &'a Instance,
 }
 
-impl<'a> WindowClass<'a> {
+impl<'a> Class<'a> {
     pub fn as_atom(&self) -> NonZero_ATOM { self.atom }
 
     pub fn instance(&self) -> &'a Instance { self.instance }
 
-    pub fn new(name: &Nul<u16>, instance: &'a Instance) -> io::Result<WindowClass<'a>> {
+    pub fn new(name: &Nul<u16>, instance: &'a Instance) -> io::Result<Class<'a>> {
         let wnd_class = WNDCLASSW {
             style: CS_HREDRAW | CS_VREDRAW,
             cbClsExtra: 0,
@@ -69,11 +69,11 @@ impl<'a> WindowClass<'a> {
             lpfnWndProc: Some(wnd_proc)
         };
         let atom = NonZero_ATOM::new(unsafe { RegisterClassW(&wnd_class as *const _) }).ok_or_else(io::Error::last_os_error)?;
-        Ok(WindowClass { atom, instance })
+        Ok(Class { atom, instance })
     }
 }
 
-impl<'a> Drop for WindowClass<'a> {
+impl<'a> Drop for Class<'a> {
     fn drop(&mut self) {
         let ok = unsafe { UnregisterClassW(self.atom.get() as usize as LPCWSTR, self.instance.as_handle().as_ptr()) };
         assert_ne!(ok, 0, "UnregisterClassW failed");
@@ -106,15 +106,15 @@ pub trait WindowImpl {
 pub struct Window<'a, 'b> {
     h_wnd: NonNull<HWND__>,
     #[educe(PartialOrd(ignore), Ord(ignore), PartialEq(ignore), Eq(ignore), Hash(ignore))]
-    class: &'a WindowClass<'b>
+    class: &'a Class<'b>
 }
 
 impl<'a, 'b> Window<'a, 'b> {
     pub fn as_h_wnd(&self) -> NonNull<HWND__> { self.h_wnd }
 
-    pub fn class(&self) -> &'a WindowClass<'b> { self.class }
+    pub fn class(&self) -> &'a Class<'b> { self.class }
 
-    pub fn new(name: &Nul<u16>, class: &'a WindowClass<'b>, w_impl: Box<dyn WindowImpl>) -> io::Result<Window<'a, 'b>> {
+    pub fn new(name: &Nul<u16>, class: &'a Class<'b>, w_impl: Box<dyn WindowImpl>) -> io::Result<Window<'a, 'b>> {
         let h_wnd = unsafe { CreateWindowExW(
             0,
             class.as_atom().get() as usize as LPCWSTR,
@@ -161,7 +161,7 @@ unsafe extern "system" fn wnd_proc(h_wnd: HWND, message: UINT, w_param: WPARAM, 
         let w_impl = w_impl.as_ref();
         let instance = ManuallyDrop::new(Instance(NonNull::new(GetWindowLongPtrW(h_wnd.as_ptr(), GWLP_HINSTANCE) as HINSTANCE)
             .ok_or_else(io::Error::last_os_error).expect("GetWindowLongPtrW|GWLP_HINSTANCE")));
-        let class = ManuallyDrop::new(WindowClass {
+        let class = ManuallyDrop::new(Class {
             instance: &instance,
             atom: NonZero_ATOM::new(GetClassWord(h_wnd.as_ptr(), GCW_ATOM))
                 .ok_or_else(io::Error::last_os_error).expect("GetClassWord|GCW_ATOM")
