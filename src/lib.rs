@@ -4,15 +4,16 @@
 use educe::Educe;
 use null_terminated::Nul;
 use std::io::{self};
-use std::mem::{MaybeUninit};
+use std::mem::{MaybeUninit, ManuallyDrop};
 use std::os::raw::{NonZero_c_ushort, c_int};
 use std::ptr::{null, null_mut, NonNull};
 use winapi::shared::basetsd::LONG_PTR;
-use winapi::shared::minwindef::{HINSTANCE__, UINT, WPARAM, LPARAM, LRESULT, LPVOID, TRUE};
-use winapi::shared::windef::{HBRUSH, HWND, HWND__};
+use winapi::shared::minwindef::{HINSTANCE__, HINSTANCE, UINT, WPARAM, LPARAM, LRESULT, LPVOID};
+use winapi::shared::windef::{HBRUSH, HWND, HWND__, HDC__};
 use winapi::um::libloaderapi::GetModuleHandleW;
-use winapi::um::winuser::{LoadIconW, LoadCursorW, IDI_APPLICATION, IDC_ARROW, COLOR_WINDOW, RegisterClassW, WNDCLASSW, CS_HREDRAW, CS_VREDRAW, PostQuitMessage, DefWindowProcW, WM_DESTROY, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, HWND_DESKTOP, CreateWindowExW, SW_SHOWDEFAULT, ShowWindow, GetMessageW, TranslateMessage, DispatchMessageW, UnregisterClassW, DestroyWindow, WM_NCCREATE, CREATESTRUCTW, SetWindowLongPtrW, GWLP_USERDATA, GetWindowLongPtrW};
+use winapi::um::winuser::{LoadIconW, LoadCursorW, IDI_APPLICATION, IDC_ARROW, COLOR_WINDOW, RegisterClassW, WNDCLASSW, CS_HREDRAW, CS_VREDRAW, PostQuitMessage, DefWindowProcW, WM_DESTROY, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, HWND_DESKTOP, CreateWindowExW, SW_SHOWDEFAULT, ShowWindow, GetMessageW, TranslateMessage, DispatchMessageW, UnregisterClassW, DestroyWindow, WM_NCCREATE, CREATESTRUCTW, SetWindowLongPtrW, GWLP_USERDATA, GetWindowLongPtrW, WM_PAINT, BeginPaint, EndPaint, GWLP_HINSTANCE, GetClassWord, GCW_ATOM, GetClientRect};
 use winapi::um::winnt::LPCWSTR;
+use winapi::um::wingdi::SetPixel;
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct Instance(NonNull<HINSTANCE__>);
@@ -79,8 +80,25 @@ impl<'a> Drop for WindowClass<'a> {
     }
 }
 
+pub struct DeviceContext {
+    h_dc: NonNull<HDC__>,
+}
+
+pub use winapi::shared::windef::COLORREF as COLORREF;
+pub use winapi::um::wingdi::RGB as RGB;
+
+impl DeviceContext {
+    pub fn set_pixel(&self, x: c_int, y: c_int, color: COLORREF) -> Option<COLORREF> {
+        let res = unsafe { SetPixel(self.h_dc.as_ptr(), x, y, color) };
+        if res == u32::MAX { None } else { Some(res) }
+    }
+}
+
+pub use winapi::shared::windef::RECT as RECT;
+
 pub trait WindowImpl {
-    fn destroy(&self, handled: &mut bool) { *handled = false; }
+    fn destroy(&self, _window: &Window, handled: &mut bool) { *handled = false; }
+    fn paint(&self, _window: &Window, _dc: &DeviceContext, _rect: RECT) { }
 }
 
 #[derive(Educe)]
@@ -114,6 +132,13 @@ impl<'a, 'b> Window<'a, 'b> {
     pub fn show(&self) -> bool {
         unsafe { ShowWindow(self.h_wnd.as_ptr(), SW_SHOWDEFAULT) != 0 }
     }
+
+    pub fn get_client_rect(&self) -> RECT {
+        let mut rect = MaybeUninit::uninit();
+        let ok = unsafe { GetClientRect(self.h_wnd.as_ptr(), rect.as_mut_ptr()) };
+        if ok != 0 { Ok(()) } else { Err(io::Error::last_os_error()) }.expect("GetClientRect");
+        unsafe { rect.assume_init() }
+    }
 }
 
 impl<'a, 'b> Drop for Window<'a, 'b> {
@@ -126,21 +151,41 @@ impl<'a, 'b> Drop for Window<'a, 'b> {
 }
 
 unsafe extern "system" fn wnd_proc(h_wnd: HWND, message: UINT, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
+    let h_wnd = NonNull::new_unchecked(h_wnd);
     if message == WM_NCCREATE {
         let create_struct = l_param as *const CREATESTRUCTW;
-        SetWindowLongPtrW(h_wnd, GWLP_USERDATA, (*create_struct).lpCreateParams as LONG_PTR);
-        return TRUE as LRESULT;
+        SetWindowLongPtrW(h_wnd.as_ptr(), GWLP_USERDATA, (*create_struct).lpCreateParams as LONG_PTR);
+        return DefWindowProcW(h_wnd.as_ptr(), message, w_param, l_param);
     }
-    let w_impl = &*(GetWindowLongPtrW(h_wnd, GWLP_USERDATA) as *mut Box<dyn WindowImpl>);
-    match message {
-        WM_DESTROY => {
-            let mut handled = true;
-            w_impl.destroy(&mut handled);
-            if handled { return 0; }
-        },
-        _ => { },
+    if let Some(w_impl) = NonNull::new(GetWindowLongPtrW(h_wnd.as_ptr(), GWLP_USERDATA) as *mut Box<dyn WindowImpl>) {
+        let w_impl = w_impl.as_ref();
+        let instance = ManuallyDrop::new(Instance(NonNull::new(GetWindowLongPtrW(h_wnd.as_ptr(), GWLP_HINSTANCE) as HINSTANCE)
+            .ok_or_else(io::Error::last_os_error).expect("GetWindowLongPtrW|GWLP_HINSTANCE")));
+        let class = ManuallyDrop::new(WindowClass {
+            instance: &instance,
+            atom: NonZero_ATOM::new(GetClassWord(h_wnd.as_ptr(), GCW_ATOM))
+                .ok_or_else(io::Error::last_os_error).expect("GetClassWord|GCW_ATOM")
+        });
+        let window = ManuallyDrop::new(Window { class: &class, h_wnd });
+        match message {
+            WM_DESTROY => {
+                let mut handled = true;
+                w_impl.destroy(&window, &mut handled);
+                if handled { return 0; }
+            },
+            WM_PAINT => {
+                let mut ps = MaybeUninit::uninit();
+                let ok = BeginPaint(h_wnd.as_ptr(), ps.as_mut_ptr());
+                assert_ne!(ok, null_mut());
+                let ps = ps.assume_init();
+                w_impl.paint(&window, &DeviceContext { h_dc: NonNull::new_unchecked(ps.hdc) }, ps.rcPaint);
+                EndPaint(h_wnd.as_ptr(), &ps as *const _);
+                return 0;
+            },
+            _ => {},
+        }
     }
-    DefWindowProcW(h_wnd, message, w_param, l_param)
+    DefWindowProcW(h_wnd.as_ptr(), message, w_param, l_param)
 }
 
 #[cfg(test)]
