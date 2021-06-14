@@ -6,4 +6,5 @@ edition = "2018"
 [dependencies]
 educe = "0.4.16"
 null-terminated = "0.3.15"
+utf16_lit = "2.0.2"
 winapi = { version = "0.3", features = ["winuser", "libloaderapi", "winnt"] }
