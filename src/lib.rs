@@ -8,8 +8,7 @@ use num_traits::ToPrimitive;
 use std::fmt::{self, Display, Formatter};
 use std::io::{self};
 use std::marker::PhantomData;
-use std::mem::{MaybeUninit, ManuallyDrop};
-use std::ops::{Deref, DerefMut};
+use std::mem::{MaybeUninit, ManuallyDrop, transmute};
 use std::os::raw::{NonZero_c_ushort, c_int};
 use std::ptr::{null, null_mut, NonNull};
 use winapi::shared::basetsd::LONG_PTR;
@@ -110,39 +109,26 @@ impl<'a> Drop for Class<'a> {
     }
 }
 
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct DeviceContext {
-    h_dc: NonNull<HDC__>,
-}
-
-
 #[allow(non_camel_case_types)]
 type HGDIOBJ__ = winapi::ctypes::c_void;
 
-pub struct DeviceContextWithSelectedObject<'a, 'b> where 'a: 'b {
-    context: &'a mut DeviceContext,
-    object: PhantomData<&'b Pen>,
-    original: NonNull<HGDIOBJ__>,
+#[derive(Debug)]
+pub struct DeviceContext<'pen> {
+    h_dc: NonNull<HDC__>,
+    selected_pen: PhantomData<&'pen Pen>,
+    default_pen: Option<NonNull<HGDIOBJ__>>,
 }
 
-impl<'a, 'b> Deref for DeviceContextWithSelectedObject<'a, 'b> {
-    type Target = DeviceContext;
-
-    fn deref(&self) -> &DeviceContext { self.context }
-}
-
-impl<'a, 'b> DerefMut for DeviceContextWithSelectedObject<'a, 'b> {
-    fn deref_mut(&mut self) -> &mut DeviceContext { self.context }
-}
-
-impl<'a, 'b> Drop for DeviceContextWithSelectedObject<'a, 'b> {
+impl<'pen> Drop for DeviceContext<'pen> {
     fn drop(&mut self) {
-        let object = unsafe { SelectObject(self.context.h_dc.as_ptr(), self.original.as_ptr()) };
-        assert_ne!(object, null_mut(), "SelectObject failed");
+        if let Some(default_pen) = self.default_pen {
+            let object = unsafe { SelectObject(self.h_dc.as_ptr(), default_pen.as_ptr()) };
+            assert_ne!(object, null_mut(), "SelectObject failed");
+        }
     }
 }
 
-impl DeviceContext {
+impl<'pen> DeviceContext<'pen> {
     pub fn set_pixel(&mut self, x: c_int, y: c_int, color: COLORREF) -> Option<COLORREF> {
         let res = unsafe { SetPixel(self.h_dc.as_ptr(), x, y, color) };
         if res == u32::MAX { None } else { Some(res) }
@@ -165,13 +151,15 @@ impl DeviceContext {
         assert_ne!(ok, 0, "Rectangle failed");
     }
 
-    pub fn select_object<'a, 'b>(&'a mut self, object: &'b Pen) -> DeviceContextWithSelectedObject<'a, 'b> {
-        let original = unsafe { SelectObject(self.h_dc.as_ptr(), object.0.as_ptr() as HGDIOBJ) };
-        let original = NonNull::new(original).expect("SelectObject failed");
-        DeviceContextWithSelectedObject { context: self, object: PhantomData, original }
+    pub fn select_pen<'a, 'new_pen>(&'a mut self, pen: &'new_pen Pen) -> &'a mut DeviceContext<'new_pen> {
+        let previous_pen = unsafe { SelectObject(self.h_dc.as_ptr(), pen.0.as_ptr() as HGDIOBJ) };
+        let previous_pen = NonNull::new(previous_pen).expect("SelectObject failed");
+        if self.default_pen.is_none() {
+            self.default_pen.replace(previous_pen);
+        }
+        unsafe { transmute(self) }
     }
 }
-
 
 pub trait WindowImpl {
     fn destroy(&self, _window: &Window, handled: &mut bool) { *handled = false; }
@@ -253,11 +241,16 @@ unsafe extern "system" fn wnd_proc(h_wnd: HWND, message: UINT, w_param: WPARAM, 
                 let ok = BeginPaint(h_wnd.as_ptr(), ps.as_mut_ptr());
                 assert_ne!(ok, null_mut(), "BeginPaint failed");
                 let ps = ps.assume_init();
-                w_impl.paint(&window, &mut DeviceContext { h_dc: NonNull::new_unchecked(ps.hdc) }, ps.rcPaint);
+                let mut dc = DeviceContext {
+                    h_dc: NonNull::new_unchecked(ps.hdc),
+                    default_pen: None,
+                    selected_pen: <PhantomData<&'static Pen>>::default()
+                };
+                w_impl.paint(&window, &mut dc, ps.rcPaint);
                 EndPaint(h_wnd.as_ptr(), &ps as *const _);
                 return 0;
             },
-            _ => {},
+            _ => { },
         }
     }
     DefWindowProcW(h_wnd.as_ptr(), message, w_param, l_param)
