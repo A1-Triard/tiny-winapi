@@ -1,7 +1,15 @@
 [package]
+edition = "2018"
 name = "tiny-winapi"
 version = "0.0.1"
-edition = "2018"
+authors = ["warlock <internalmike@gmail.com>"]
+description = "Minimal safe wrap around WinAPI."
+readme = "README.md"
+documentation = "https://docs.rs/tiny-winapi/"
+keywords = ["WinAPI", "thin", "wrap", "safe"]
+categories = ["os::windows-apis", "gui"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/A1-Triard/tiny-winapi"
 
 [dependencies]
 educe = "0.4.16"
