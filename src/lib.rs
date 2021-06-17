@@ -14,9 +14,9 @@ use winapi::shared::basetsd::LONG_PTR;
 use winapi::shared::minwindef::{HINSTANCE__, HINSTANCE, UINT, WPARAM, LPARAM, LRESULT, LPVOID};
 use winapi::shared::windef::{HBRUSH, HWND, HWND__, HDC__, HPEN__, HPEN, HGDIOBJ};
 use winapi::um::libloaderapi::GetModuleHandleW;
-use winapi::um::wingdi::{SetPixel, MoveToEx, LineTo, GetStockObject, WHITE_PEN, SelectObject};
+use winapi::um::wingdi::{SetPixel, MoveToEx, LineTo, GetStockObject, WHITE_PEN, SelectObject, Rectangle};
 use winapi::um::winnt::LPCWSTR;
-use winapi::um::winuser::{LoadIconW, LoadCursorW, IDI_APPLICATION, IDC_ARROW, RegisterClassW, WNDCLASSW, CS_HREDRAW, CS_VREDRAW, PostQuitMessage, DefWindowProcW, WM_DESTROY, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, HWND_DESKTOP, CreateWindowExW, SW_SHOWDEFAULT, ShowWindow, GetMessageW, TranslateMessage, DispatchMessageW, UnregisterClassW, DestroyWindow, WM_NCCREATE, CREATESTRUCTW, SetWindowLongPtrW, GWLP_USERDATA, GetWindowLongPtrW, WM_PAINT, BeginPaint, EndPaint, GWLP_HINSTANCE, GetClassWord, GCW_ATOM, GetClientRect, COLOR_ACTIVEBORDER};
+use winapi::um::winuser::{LoadIconW, LoadCursorW, IDI_APPLICATION, IDC_ARROW, RegisterClassW, WNDCLASSW, CS_HREDRAW, CS_VREDRAW, PostQuitMessage, DefWindowProcW, WM_DESTROY, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, HWND_DESKTOP, CreateWindowExW, SW_SHOWDEFAULT, ShowWindow, GetMessageW, TranslateMessage, DispatchMessageW, UnregisterClassW, DestroyWindow, WM_NCCREATE, CREATESTRUCTW, SetWindowLongPtrW, GWLP_USERDATA, GetWindowLongPtrW, WM_PAINT, BeginPaint, EndPaint, GWLP_HINSTANCE, GetClassWord, GCW_ATOM, GetClientRect, COLOR_3DFACE};
 
 pub use winapi::shared::windef::COLORREF as COLORREF;
 pub use winapi::shared::windef::POINT as POINT;
@@ -89,7 +89,7 @@ impl<'a> Class<'a> {
             hInstance: instance.as_handle().as_ptr(),
             hIcon: unsafe { LoadIconW(null_mut(), IDI_APPLICATION) },
             hCursor: unsafe { LoadCursorW(null_mut(), IDC_ARROW) },
-            hbrBackground: (COLOR_ACTIVEBORDER + 1) as HBRUSH,
+            hbrBackground: (COLOR_3DFACE + 1) as HBRUSH,
             lpszMenuName: null(),
             lpszClassName: name.as_ptr(),
             lpfnWndProc: Some(wnd_proc)
@@ -154,6 +154,11 @@ impl DeviceContext {
     pub fn line_to(&mut self, x: c_int, y: c_int) {
         let ok = unsafe { LineTo(self.h_dc.as_ptr(), x, y) };
         assert_ne!(ok, 0, "LineTo failed");
+    }
+
+    pub fn rectangle(&mut self, left: c_int, top: c_int, right: c_int, bottom: c_int) {
+        let ok = unsafe { Rectangle(self.h_dc.as_ptr(), left, top, right, bottom) };
+        assert_ne!(ok, 0, "Rectangle failed");
     }
 
     pub fn select_object<'a, 'b>(&'a mut self, object: &'b Pen) -> DeviceContextWithSelectedObject<'a, 'b> {
