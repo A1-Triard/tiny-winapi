@@ -5,6 +5,8 @@ edition = "2018"
 
 [dependencies]
 educe = "0.4.16"
+enum-primitive-derive = "0.2.1"
 null-terminated = "0.3.15"
+num-traits = "0.2.14"
 utf16_lit = "2.0.2"
 winapi = { version = "0.3", features = ["winuser", "libloaderapi", "winnt"] }

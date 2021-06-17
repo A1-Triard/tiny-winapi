@@ -2,7 +2,9 @@
 #![deny(warnings)]
 
 use educe::Educe;
+use enum_primitive_derive::Primitive;
 use null_terminated::Nul;
+use num_traits::ToPrimitive;
 use std::fmt::{self, Display, Formatter};
 use std::io::{self};
 use std::marker::PhantomData;
@@ -14,7 +16,8 @@ use winapi::shared::basetsd::LONG_PTR;
 use winapi::shared::minwindef::{HINSTANCE__, HINSTANCE, UINT, WPARAM, LPARAM, LRESULT, LPVOID};
 use winapi::shared::windef::{HBRUSH, HWND, HWND__, HDC__, HPEN__, HPEN, HGDIOBJ};
 use winapi::um::libloaderapi::GetModuleHandleW;
-use winapi::um::wingdi::{SetPixel, MoveToEx, LineTo, GetStockObject, WHITE_PEN, SelectObject, Rectangle};
+use winapi::um::wingdi::{SetPixel, MoveToEx, LineTo, GetStockObject, WHITE_PEN, SelectObject, CreatePen};
+use winapi::um::wingdi::{Rectangle, DeleteObject, PS_SOLID, PS_DOT, PS_DASHDOT, PS_DASHDOTDOT, PS_NULL, PS_INSIDEFRAME, PS_DASH};
 use winapi::um::winnt::LPCWSTR;
 use winapi::um::winuser::{LoadIconW, LoadCursorW, IDI_APPLICATION, IDC_ARROW, RegisterClassW, WNDCLASSW, CS_HREDRAW, CS_VREDRAW, PostQuitMessage, DefWindowProcW, WM_DESTROY, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, HWND_DESKTOP, CreateWindowExW, SW_SHOWDEFAULT, ShowWindow, GetMessageW, TranslateMessage, DispatchMessageW, UnregisterClassW, DestroyWindow, WM_NCCREATE, CREATESTRUCTW, SetWindowLongPtrW, GWLP_USERDATA, GetWindowLongPtrW, WM_PAINT, BeginPaint, EndPaint, GWLP_HINSTANCE, GetClassWord, GCW_ATOM, GetClientRect, COLOR_3DFACE};
 
@@ -27,6 +30,7 @@ pub use winapi::um::wingdi::RGB as RGB;
 pub use utf16_lit::utf16_null as utf16_lit_utf16_null;
 #[doc(hidden)]
 pub use null_terminated::Nul as null_terminated_Nul;
+use std::hint::unreachable_unchecked;
 
 #[derive(Clone, Copy, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct WStr<'a>(pub &'a Nul<u16>);
@@ -261,6 +265,34 @@ unsafe extern "system" fn wnd_proc(h_wnd: HWND, message: UINT, w_param: WPARAM, 
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct Pen(NonNull<HPEN__>);
+
+impl Drop for Pen {
+    fn drop(&mut self) {
+        let ok = unsafe { DeleteObject(self.0.as_ptr() as HGDIOBJ) };
+        assert_ne!(ok, 0, "DeleteObject failed");
+    }
+}
+
+#[derive(Primitive)]
+#[derive(Ord, PartialOrd, Eq, PartialEq, Hash, Copy, Clone)]
+#[derive(Debug)]
+#[repr(i32)]
+pub enum PenStyle {
+    Solid = PS_SOLID as i32,
+    Dash = PS_DASH as i32,
+    Dot = PS_DOT as i32,
+    DashDot = PS_DASHDOT as i32,
+    DashDotDot = PS_DASHDOTDOT as i32,
+    Null = PS_NULL as i32,
+    InsideFrame = PS_INSIDEFRAME as i32,
+}
+
+impl Pen {
+    pub fn new(style: PenStyle, width: c_int, color: COLORREF) -> Pen {
+        let pen = unsafe { NonNull::new(CreatePen(style.to_i32().unwrap_or_else(|| unreachable_unchecked()), width, color)) };
+        Pen(pen.expect("CreatePen failed"))
+    }
+}
 
 pub enum Stock { }
 
