@@ -8,15 +8,15 @@ use num_traits::ToPrimitive;
 use std::fmt::{self, Display, Formatter};
 use std::io::{self};
 use std::marker::PhantomData;
-use std::mem::{MaybeUninit, ManuallyDrop};
+use std::mem::{MaybeUninit, ManuallyDrop, transmute};
 use std::ops::{Deref, DerefMut};
 use std::os::raw::{NonZero_c_ushort, c_int};
 use std::ptr::{null, null_mut, NonNull};
 use winapi::shared::basetsd::LONG_PTR;
 use winapi::shared::minwindef::{HINSTANCE__, HINSTANCE, UINT, WPARAM, LPARAM, LRESULT, LPVOID};
-use winapi::shared::windef::{HBRUSH, HWND, HWND__, HDC__, HPEN__, HPEN, HGDIOBJ};
+use winapi::shared::windef::{HBRUSH, HWND, HWND__, HDC__, HPEN__, HPEN, HGDIOBJ, HBRUSH__};
 use winapi::um::libloaderapi::GetModuleHandleW;
-use winapi::um::wingdi::{SetPixel, MoveToEx, LineTo, GetStockObject, WHITE_PEN, SelectObject, CreatePen};
+use winapi::um::wingdi::{SetPixel, MoveToEx, LineTo, GetStockObject, WHITE_PEN, SelectObject, CreatePen, CreateSolidBrush};
 use winapi::um::wingdi::{Rectangle, DeleteObject, PS_SOLID, PS_DOT, PS_DASHDOT, PS_DASHDOTDOT, PS_NULL, PS_INSIDEFRAME, PS_DASH};
 use winapi::um::winnt::LPCWSTR;
 use winapi::um::winuser::{LoadIconW, LoadCursorW, IDI_APPLICATION, IDC_ARROW, RegisterClassW, WNDCLASSW, CS_HREDRAW, CS_VREDRAW, PostQuitMessage, DefWindowProcW, WM_DESTROY, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, HWND_DESKTOP, CreateWindowExW, SW_SHOWDEFAULT, ShowWindow, GetMessageW, TranslateMessage, DispatchMessageW, UnregisterClassW, DestroyWindow, WM_NCCREATE, CREATESTRUCTW, SetWindowLongPtrW, GWLP_USERDATA, GetWindowLongPtrW, WM_PAINT, BeginPaint, EndPaint, GWLP_HINSTANCE, GetClassWord, GCW_ATOM, GetClientRect, COLOR_3DFACE};
@@ -115,13 +115,16 @@ pub struct DeviceContext {
     h_dc: NonNull<HDC__>,
 }
 
-
 #[allow(non_camel_case_types)]
 type HGDIOBJ__ = winapi::ctypes::c_void;
 
+pub unsafe trait GdiObject {
+    fn h_gdi_obj(&self) -> NonNull<HGDIOBJ__>;
+}
+
 pub struct DeviceContextWithSelectedObject<'a, 'b> where 'a: 'b {
     context: &'a mut DeviceContext,
-    object: PhantomData<&'b Pen>,
+    object: PhantomData<&'b dyn GdiObject>,
     original: NonNull<HGDIOBJ__>,
 }
 
@@ -165,13 +168,12 @@ impl DeviceContext {
         assert_ne!(ok, 0, "Rectangle failed");
     }
 
-    pub fn select_object<'a, 'b>(&'a mut self, object: &'b Pen) -> DeviceContextWithSelectedObject<'a, 'b> {
-        let original = unsafe { SelectObject(self.h_dc.as_ptr(), object.0.as_ptr() as HGDIOBJ) };
+    pub fn select_object<'a, 'b>(&'a mut self, object: &'b dyn GdiObject) -> DeviceContextWithSelectedObject<'a, 'b> {
+        let original = unsafe { SelectObject(self.h_dc.as_ptr(), object.h_gdi_obj().as_ptr() as HGDIOBJ) };
         let original = NonNull::new(original).expect("SelectObject failed");
         DeviceContextWithSelectedObject { context: self, object: PhantomData, original }
     }
 }
-
 
 pub trait WindowImpl {
     fn destroy(&self, _window: &Window, handled: &mut bool) { *handled = false; }
@@ -264,6 +266,27 @@ unsafe extern "system" fn wnd_proc(h_wnd: HWND, message: UINT, w_param: WPARAM, 
 }
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+pub struct Brush(NonNull<HBRUSH__>);
+
+impl Drop for Brush {
+    fn drop(&mut self) {
+        let ok = unsafe { DeleteObject(self.0.as_ptr() as HGDIOBJ) };
+        assert_ne!(ok, 0, "DeleteObject failed");
+    }
+}
+
+unsafe impl GdiObject for Brush {
+    fn h_gdi_obj(&self) -> NonNull<HGDIOBJ__> { unsafe { transmute(self.0) } }
+}
+
+impl Brush {
+    pub fn new_solid(color: COLORREF) -> Brush {
+        let brush = unsafe { NonNull::new(CreateSolidBrush(color)) };
+        Brush(brush.expect("CreateSolidBrush failed"))
+    }
+}
+
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct Pen(NonNull<HPEN__>);
 
 impl Drop for Pen {
@@ -271,6 +294,10 @@ impl Drop for Pen {
         let ok = unsafe { DeleteObject(self.0.as_ptr() as HGDIOBJ) };
         assert_ne!(ok, 0, "DeleteObject failed");
     }
+}
+
+unsafe impl GdiObject for Pen {
+    fn h_gdi_obj(&self) -> NonNull<HGDIOBJ__> { unsafe { transmute(self.0) } }
 }
 
 #[derive(Primitive)]
