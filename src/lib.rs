@@ -37,9 +37,9 @@ use winapi::um::winnt::LPCWSTR;
 use winapi::um::winuser::*;
 
 #[derive(Clone, Copy, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct ZWStr<'a>(pub &'a Nul<u16>);
+pub struct WStrZ<'a>(pub &'a Nul<u16>);
 
-impl<'a> ZWStr<'a> {
+impl<'a> WStrZ<'a> {
     pub fn as_ptr(self) -> *const u16 { self.0.as_ptr() }
 
     pub fn len(self) -> usize { self.0.len() }
@@ -47,7 +47,7 @@ impl<'a> ZWStr<'a> {
     pub fn as_w_str(self) -> WStr<'a> { WStr(&self.0[..]) }
 }
 
-impl<'a> Display for ZWStr<'a> {
+impl<'a> Display for WStrZ<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         String::from_utf16_lossy(&self.0[..]).fmt(f)
     }
@@ -93,7 +93,7 @@ impl Instance {
         unsafe { PostQuitMessage(exit_code) }
     }
 
-    pub fn play_sound(file: ZWStr) {
+    pub fn play_sound(file: WStrZ) {
         let ok = unsafe { PlaySoundW(file.as_ptr(), null_mut(), SND_FILENAME | SND_ASYNC ) };
         assert_ne!(ok, 0, "PlaySoundW failed")
     }
@@ -146,7 +146,7 @@ impl<'a> Class<'a> {
 
     pub fn instance(&self) -> &'a Instance { self.instance }
 
-    pub fn new(name: ZWStr, instance: &'a Instance, background: WindowBackground) -> io::Result<Class<'a>> {
+    pub fn new(name: WStrZ, instance: &'a Instance, background: WindowBackground) -> io::Result<Class<'a>> {
         let background = match background {
             WindowBackground::None => null_mut(),
             WindowBackground::System(color) => (color.to_u32().unwrap_or_else(|| unsafe { unreachable_unchecked() }) + 1) as HBRUSH,
@@ -269,7 +269,7 @@ impl<'a, 'b> Window<'a, 'b> {
 
     pub fn class(&self) -> &'a Class<'b> { self.class }
 
-    pub fn new(name: ZWStr, class: &'a Class<'b>, w_proc: Box<dyn WindowProc>) -> io::Result<Window<'a, 'b>> {
+    pub fn new(name: WStrZ, class: &'a Class<'b>, w_proc: Box<dyn WindowProc>) -> io::Result<Window<'a, 'b>> {
         let h_wnd = unsafe { CreateWindowExW(
             0,
             class.as_atom().get() as usize as LPCWSTR,
@@ -419,9 +419,9 @@ impl Stock {
 }
 
 #[macro_export]
-macro_rules! z_w_str {
+macro_rules! w_str_z {
     ($($tokens:tt)*) => {
-        $crate::ZWStr(unsafe {
+        $crate::WStrZ(unsafe {
             $crate::null_terminated_Nul::new_unchecked(
                 &$crate::utf16_lit_utf16_null!($($tokens)*) as *const _
             )
