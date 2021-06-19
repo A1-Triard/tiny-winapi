@@ -16,7 +16,7 @@ use winapi::shared::basetsd::LONG_PTR;
 use winapi::shared::minwindef::{HINSTANCE__, HINSTANCE, UINT, WPARAM, LPARAM, LRESULT, LPVOID};
 use winapi::shared::windef::{HBRUSH, HWND, HWND__, HDC__, HPEN__, HPEN, HGDIOBJ, HBRUSH__};
 use winapi::um::libloaderapi::GetModuleHandleW;
-use winapi::um::wingdi::{SetPixel, MoveToEx, LineTo, GetStockObject, WHITE_PEN, SelectObject, CreatePen, CreateSolidBrush};
+use winapi::um::wingdi::{SetPixel, MoveToEx, LineTo, GetStockObject, WHITE_PEN, SelectObject, CreatePen, CreateSolidBrush, WHITE_BRUSH};
 use winapi::um::wingdi::{Rectangle, DeleteObject, PS_SOLID, PS_DOT, PS_DASHDOT, PS_DASHDOTDOT, PS_NULL, PS_INSIDEFRAME, PS_DASH};
 use winapi::um::winnt::LPCWSTR;
 use winapi::um::winuser::{LoadIconW, LoadCursorW, IDI_APPLICATION, IDC_ARROW, RegisterClassW, WNDCLASSW, CS_HREDRAW, CS_VREDRAW, PostQuitMessage, DefWindowProcW, WM_DESTROY, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, HWND_DESKTOP, CreateWindowExW, SW_SHOWDEFAULT, ShowWindow, GetMessageW, TranslateMessage, DispatchMessageW, UnregisterClassW, DestroyWindow, WM_NCCREATE, CREATESTRUCTW, SetWindowLongPtrW, GWLP_USERDATA, GetWindowLongPtrW, WM_PAINT, BeginPaint, EndPaint, GWLP_HINSTANCE, GetClassWord, GCW_ATOM, GetClientRect, COLOR_3DFACE};
@@ -326,6 +326,10 @@ pub enum Stock { }
 impl Stock {
     pub fn white_pen() -> Pen {
         Pen(NonNull::new(unsafe { GetStockObject(WHITE_PEN as c_int) as HPEN }).expect("GetStockObject|WHITE_PEN failed"))
+    }
+
+    pub fn white_brush() -> Brush {
+        Brush(NonNull::new(unsafe { GetStockObject(WHITE_BRUSH as c_int) as HBRUSH }).expect("GetStockObject|WHITE_BRUSH failed"))
     }
 }
 
