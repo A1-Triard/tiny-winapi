@@ -1,14 +1,28 @@
 #![feature(raw_os_nonzero)]
 #![deny(warnings)]
 
+pub use winapi::shared::windef::COLORREF as COLORREF;
+pub use winapi::shared::windef::POINT as POINT;
+pub use winapi::shared::windef::RECT as RECT;
+pub use winapi::um::wingdi::RGB as RGB;
+
+#[doc(hidden)]
+pub use utf16_lit::utf16 as utf16_lit_utf16;
+#[doc(hidden)]
+pub use utf16_lit::utf16_null as utf16_lit_utf16_null;
+#[doc(hidden)]
+pub use null_terminated::Nul as null_terminated_Nul;
+
 use educe::Educe;
 use enum_primitive_derive::Primitive;
 use null_terminated::Nul;
 use num_traits::ToPrimitive;
+use std::convert::TryInto;
 use std::fmt::{self, Display, Formatter};
+use std::hint::unreachable_unchecked;
 use std::io::{self};
 use std::marker::PhantomData;
-use std::mem::{MaybeUninit, ManuallyDrop, transmute};
+use std::mem::{MaybeUninit, ManuallyDrop, transmute, size_of};
 use std::ops::{Deref, DerefMut};
 use std::os::raw::{NonZero_c_ushort, c_int};
 use std::ptr::{null, null_mut, NonNull};
@@ -16,32 +30,41 @@ use winapi::shared::basetsd::LONG_PTR;
 use winapi::shared::minwindef::{HINSTANCE__, HINSTANCE, UINT, WPARAM, LPARAM, LRESULT, LPVOID};
 use winapi::shared::windef::{HBRUSH, HWND, HWND__, HDC__, HPEN__, HPEN, HGDIOBJ, HBRUSH__};
 use winapi::um::libloaderapi::GetModuleHandleW;
+use winapi::um::playsoundapi::{PlaySoundW, SND_FILENAME, SND_ASYNC};
 use winapi::um::wingdi::{SetPixel, MoveToEx, LineTo, GetStockObject, WHITE_PEN, SelectObject, CreatePen, CreateSolidBrush, WHITE_BRUSH};
 use winapi::um::wingdi::{Rectangle, DeleteObject, PS_SOLID, PS_DOT, PS_DASHDOT, PS_DASHDOTDOT, PS_NULL, PS_INSIDEFRAME, PS_DASH};
 use winapi::um::winnt::LPCWSTR;
-use winapi::um::winuser::{LoadIconW, LoadCursorW, IDI_APPLICATION, IDC_ARROW, RegisterClassW, WNDCLASSW, CS_HREDRAW, CS_VREDRAW, PostQuitMessage, DefWindowProcW, WM_DESTROY, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, HWND_DESKTOP, CreateWindowExW, SW_SHOWDEFAULT, ShowWindow, GetMessageW, TranslateMessage, DispatchMessageW, UnregisterClassW, DestroyWindow, WM_NCCREATE, CREATESTRUCTW, SetWindowLongPtrW, GWLP_USERDATA, GetWindowLongPtrW, WM_PAINT, BeginPaint, EndPaint, GWLP_HINSTANCE, GetClassWord, GCW_ATOM, GetClientRect, COLOR_3DFACE};
-
-pub use winapi::shared::windef::COLORREF as COLORREF;
-pub use winapi::shared::windef::POINT as POINT;
-pub use winapi::shared::windef::RECT as RECT;
-pub use winapi::um::wingdi::RGB as RGB;
-
-#[doc(hidden)]
-pub use utf16_lit::utf16_null as utf16_lit_utf16_null;
-#[doc(hidden)]
-pub use null_terminated::Nul as null_terminated_Nul;
-use std::hint::unreachable_unchecked;
+use winapi::um::winuser::*;
 
 #[derive(Clone, Copy, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct WStr<'a>(pub &'a Nul<u16>);
+pub struct ZWStr<'a>(pub &'a Nul<u16>);
+
+impl<'a> ZWStr<'a> {
+    pub fn as_ptr(self) -> *const u16 { self.0.as_ptr() }
+
+    pub fn len(self) -> usize { self.0.len() }
+
+    pub fn as_w_str(self) -> WStr<'a> { WStr(&self.0[..]) }
+}
+
+impl<'a> Display for ZWStr<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        String::from_utf16_lossy(&self.0[..]).fmt(f)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+pub struct WStr<'a>(pub &'a [u16]);
 
 impl<'a> WStr<'a> {
     pub fn as_ptr(self) -> *const u16 { self.0.as_ptr() }
+
+    pub fn len(self) -> usize { self.0.len() }
 }
 
 impl<'a> Display for WStr<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        String::from_utf16_lossy(&self.0[..]).fmt(f)
+        String::from_utf16_lossy(self.0).fmt(f)
     }
 }
 
@@ -69,6 +92,44 @@ impl Instance {
     pub fn post_quit_message(exit_code: c_int) {
         unsafe { PostQuitMessage(exit_code) }
     }
+
+    pub fn play_sound(file: ZWStr) {
+        let ok = unsafe { PlaySoundW(file.as_ptr(), null_mut(), SND_FILENAME | SND_ASYNC ) };
+        assert_ne!(ok, 0, "PlaySoundW failed")
+    }
+}
+
+#[derive(Primitive)]
+#[derive(Ord, PartialOrd, Eq, PartialEq, Hash, Copy, Clone)]
+#[derive(Debug)]
+#[repr(u32)]
+pub enum SystemColor {
+    ActiveBorder = COLOR_ACTIVEBORDER as u32,
+    ActiveCaption = COLOR_ACTIVECAPTION as u32,
+    AppWorkspace = COLOR_APPWORKSPACE as u32,
+    Background = COLOR_BACKGROUND as u32,
+    BtnFace = COLOR_BTNFACE as u32,
+    BtnShadow = COLOR_BTNSHADOW as u32,
+    BtnText = COLOR_BTNTEXT as u32,
+    CaptionText = COLOR_CAPTIONTEXT as u32,
+    GrayText = COLOR_GRAYTEXT as u32,
+    Highlight = COLOR_HIGHLIGHT as u32,
+    HighlightText = COLOR_HIGHLIGHTTEXT as u32,
+    InactiveBorder = COLOR_INACTIVEBORDER as u32,
+    InactiveCaption = COLOR_INACTIVECAPTION as u32,
+    Menu = COLOR_MENU as u32,
+    MenuText = COLOR_MENUTEXT as u32,
+    ScrollBar = COLOR_SCROLLBAR as u32,
+    Window = COLOR_WINDOW as u32,
+    WindowFrame = COLOR_WINDOWFRAME as u32,
+    WindowText = COLOR_WINDOWTEXT as u32,
+}
+
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Copy, Clone)]
+pub enum WindowBackground<'a> {
+    None,
+    System(SystemColor),
+    Brush(&'a Brush)
 }
 
 #[allow(non_camel_case_types)]
@@ -85,20 +146,27 @@ impl<'a> Class<'a> {
 
     pub fn instance(&self) -> &'a Instance { self.instance }
 
-    pub fn new(name: WStr, instance: &'a Instance) -> io::Result<Class<'a>> {
-        let wnd_class = WNDCLASSW {
+    pub fn new(name: ZWStr, instance: &'a Instance, background: WindowBackground) -> io::Result<Class<'a>> {
+        let background = match background {
+            WindowBackground::None => null_mut(),
+            WindowBackground::System(color) => (color.to_u32().unwrap_or_else(|| unsafe { unreachable_unchecked() }) + 1) as HBRUSH,
+            WindowBackground::Brush(brush) => brush.0.as_ptr()
+        };
+        let wnd_class = WNDCLASSEXW {
+            cbSize: size_of::<WNDCLASSEXW>() as _,
             style: CS_HREDRAW | CS_VREDRAW,
             cbClsExtra: 0,
             cbWndExtra: 0,
             hInstance: instance.as_handle().as_ptr(),
             hIcon: unsafe { LoadIconW(null_mut(), IDI_APPLICATION) },
+            hIconSm: unsafe { LoadIconW(null_mut(), IDI_APPLICATION) },
             hCursor: unsafe { LoadCursorW(null_mut(), IDC_ARROW) },
-            hbrBackground: (COLOR_3DFACE + 1) as HBRUSH,
+            hbrBackground: background,
             lpszMenuName: null(),
             lpszClassName: name.as_ptr(),
             lpfnWndProc: Some(wnd_proc)
         };
-        let atom = NonZero_ATOM::new(unsafe { RegisterClassW(&wnd_class as *const _) }).ok_or_else(io::Error::last_os_error)?;
+        let atom = NonZero_ATOM::new(unsafe { RegisterClassExW(&wnd_class as *const _) }).ok_or_else(io::Error::last_os_error)?;
         Ok(Class { atom, instance })
     }
 }
@@ -173,12 +241,20 @@ impl DeviceContext {
         let original = NonNull::new(original).expect("SelectObject failed");
         DeviceContextWithSelectedObject { context: self, object: PhantomData, original }
     }
+
+    pub fn draw_text(&mut self, text: WStr, rect: &RECT) {
+        let ok = unsafe { DrawTextW(self.h_dc.as_ptr(), text.as_ptr(), text.len().try_into().expect("Too long text"), rect as *const _ as *mut _, DT_SINGLELINE | DT_CENTER | DT_VCENTER) };
+        assert_ne!(ok, 0, "DrawTextW failed");
+    }
 }
 
-pub trait WindowImpl {
+pub trait WindowProc {
+    fn create(&self, _window: &Window) { }
     fn destroy(&self, _window: &Window, handled: &mut bool) { *handled = false; }
     fn paint(&self, _window: &Window, _dc: &mut DeviceContext, _rect: RECT) { }
 }
+
+impl WindowProc for () { }
 
 #[derive(Educe)]
 #[educe(Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
@@ -193,7 +269,7 @@ impl<'a, 'b> Window<'a, 'b> {
 
     pub fn class(&self) -> &'a Class<'b> { self.class }
 
-    pub fn new(name: WStr, class: &'a Class<'b>, w_impl: Box<dyn WindowImpl>) -> io::Result<Window<'a, 'b>> {
+    pub fn new(name: ZWStr, class: &'a Class<'b>, w_proc: Box<dyn WindowProc>) -> io::Result<Window<'a, 'b>> {
         let h_wnd = unsafe { CreateWindowExW(
             0,
             class.as_atom().get() as usize as LPCWSTR,
@@ -203,13 +279,18 @@ impl<'a, 'b> Window<'a, 'b> {
             HWND_DESKTOP,
             null_mut(),
             class.instance().as_handle().as_ptr(),
-            Box::into_raw(Box::new(w_impl)) as LPVOID
+            Box::into_raw(Box::new(w_proc)) as LPVOID
         ) };
         NonNull::new(h_wnd).ok_or_else(io::Error::last_os_error).map(|h_wnd| Window { h_wnd, class })
     }
 
     pub fn show(&self) -> bool {
         unsafe { ShowWindow(self.h_wnd.as_ptr(), SW_SHOWDEFAULT) != 0 }
+    }
+
+    pub fn update(&self) {
+        let ok = unsafe { UpdateWindow(self.h_wnd.as_ptr()) };
+        assert_ne!(ok, 0, "UpdateWindow failed");
     }
 
     pub fn get_client_rect(&self) -> RECT {
@@ -222,10 +303,10 @@ impl<'a, 'b> Window<'a, 'b> {
 
 impl<'a, 'b> Drop for Window<'a, 'b> {
     fn drop(&mut self) {
-        let w_impl = unsafe { GetWindowLongPtrW(self.h_wnd.as_ptr(), GWLP_USERDATA) as *mut Box<dyn WindowImpl> };
+        let w_proc = unsafe { GetWindowLongPtrW(self.h_wnd.as_ptr(), GWLP_USERDATA) as *mut Box<dyn WindowProc> };
         let ok = unsafe { DestroyWindow(self.h_wnd.as_ptr()) };
         assert_ne!(ok, 0, "DestroyWindow failed");
-        unsafe { Box::from_raw(w_impl) };
+        unsafe { Box::from_raw(w_proc) };
     }
 }
 
@@ -234,8 +315,8 @@ unsafe extern "system" fn wnd_proc(h_wnd: HWND, message: UINT, w_param: WPARAM, 
     if message == WM_NCCREATE {
         let create_struct = l_param as *const CREATESTRUCTW;
         SetWindowLongPtrW(h_wnd.as_ptr(), GWLP_USERDATA, (*create_struct).lpCreateParams as LONG_PTR);
-    } else if let Some(w_impl) = NonNull::new(GetWindowLongPtrW(h_wnd.as_ptr(), GWLP_USERDATA) as *mut Box<dyn WindowImpl>) {
-        let w_impl = w_impl.as_ref();
+    } else if let Some(w_proc) = NonNull::new(GetWindowLongPtrW(h_wnd.as_ptr(), GWLP_USERDATA) as *mut Box<dyn WindowProc>) {
+        let w_proc = w_proc.as_ref();
         let instance = ManuallyDrop::new(Instance(NonNull::new(GetWindowLongPtrW(h_wnd.as_ptr(), GWLP_HINSTANCE) as HINSTANCE)
             .ok_or_else(io::Error::last_os_error).expect("GetWindowLongPtrW|GWLP_HINSTANCE")));
         let class = ManuallyDrop::new(Class {
@@ -245,9 +326,13 @@ unsafe extern "system" fn wnd_proc(h_wnd: HWND, message: UINT, w_param: WPARAM, 
         });
         let window = ManuallyDrop::new(Window { class: &class, h_wnd });
         match message {
+            WM_CREATE => {
+                w_proc.create(&window);
+                return 0;
+            }
             WM_DESTROY => {
                 let mut handled = true;
-                w_impl.destroy(&window, &mut handled);
+                w_proc.destroy(&window, &mut handled);
                 if handled { return 0; }
             },
             WM_PAINT => {
@@ -255,7 +340,7 @@ unsafe extern "system" fn wnd_proc(h_wnd: HWND, message: UINT, w_param: WPARAM, 
                 let ok = BeginPaint(h_wnd.as_ptr(), ps.as_mut_ptr());
                 assert_ne!(ok, null_mut(), "BeginPaint failed");
                 let ps = ps.assume_init();
-                w_impl.paint(&window, &mut DeviceContext { h_dc: NonNull::new_unchecked(ps.hdc) }, ps.rcPaint);
+                w_proc.paint(&window, &mut DeviceContext { h_dc: NonNull::new_unchecked(ps.hdc) }, ps.rcPaint);
                 EndPaint(h_wnd.as_ptr(), &ps as *const _);
                 return 0;
             },
@@ -334,12 +419,21 @@ impl Stock {
 }
 
 #[macro_export]
-macro_rules! w_str {
+macro_rules! z_w_str {
     ($($tokens:tt)*) => {
-        $crate::WStr(unsafe {
+        $crate::ZWStr(unsafe {
             $crate::null_terminated_Nul::new_unchecked(
                 &$crate::utf16_lit_utf16_null!($($tokens)*) as *const _
             )
+        })
+    };
+}
+
+#[macro_export]
+macro_rules! w_str {
+    ($($tokens:tt)*) => {
+        $crate::WStr(unsafe {
+            &$crate::utf16_lit_utf16!($($tokens)*)
         })
     };
 }
