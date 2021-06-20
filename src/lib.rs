@@ -31,7 +31,7 @@ use winapi::shared::minwindef::{HINSTANCE__, HINSTANCE, UINT, WPARAM, LPARAM, LR
 use winapi::shared::windef::{HBRUSH, HWND, HWND__, HDC__, HPEN__, HPEN, HGDIOBJ, HBRUSH__};
 use winapi::um::libloaderapi::GetModuleHandleW;
 use winapi::um::playsoundapi::{PlaySoundW, SND_FILENAME, SND_ASYNC};
-use winapi::um::wingdi::{SetPixel, MoveToEx, LineTo, GetStockObject, WHITE_PEN, SelectObject, CreatePen, CreateSolidBrush, WHITE_BRUSH};
+use winapi::um::wingdi::{SetPixel, MoveToEx, LineTo, GetStockObject, WHITE_PEN, SelectObject, CreatePen, CreateSolidBrush, WHITE_BRUSH, TextOutW};
 use winapi::um::wingdi::{Rectangle, DeleteObject, PS_SOLID, PS_DOT, PS_DASHDOT, PS_DASHDOTDOT, PS_NULL, PS_INSIDEFRAME, PS_DASH};
 use winapi::um::winnt::LPCWSTR;
 use winapi::um::winuser::*;
@@ -245,6 +245,11 @@ impl DeviceContext {
     pub fn draw_text(&mut self, text: WStr, rect: &RECT) {
         let ok = unsafe { DrawTextW(self.h_dc.as_ptr(), text.as_ptr(), text.len().try_into().expect("Too long text"), rect as *const _ as *mut _, DT_SINGLELINE | DT_CENTER | DT_VCENTER) };
         assert_ne!(ok, 0, "DrawTextW failed");
+    }
+
+    pub fn text_out(&mut self, x: c_int, y: c_int, text: WStr) {
+        let ok = unsafe { TextOutW(self.h_dc.as_ptr(), x, y, text.as_ptr(), text.len().try_into().expect("Too long text")) };
+        assert_ne!(ok, 0, "TextOutW failed");
     }
 }
 
