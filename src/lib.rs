@@ -333,7 +333,7 @@ impl DeviceContext {
         let hor = hor.to_u32().unwrap_or_else(|| unsafe { unreachable_unchecked() });
         let vert = vert.to_u32().unwrap_or_else(|| unsafe { unreachable_unchecked() });
         let ok = unsafe { SetTextAlign(self.0.as_ptr(), hor | vert) };
-        assert_ne!(ok, 0, "SetTextAlign failed");
+        assert_ne!(ok, GDI_ERROR, "SetTextAlign failed");
     }
 }
 
