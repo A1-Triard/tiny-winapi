@@ -308,7 +308,7 @@ pub enum TextVertAlign {
 #[derive(Primitive)]
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Copy, Clone)]
 #[repr(u32)]
-pub enum TextHorAlign {
+pub enum TextHorzAlign {
     Center = TA_CENTER,
     Left = TA_LEFT,
     Right = TA_RIGHT,
@@ -395,7 +395,7 @@ impl DeviceContext {
         unsafe { tm.assume_init() }
     }
 
-    pub fn set_text_align(&mut self, hor: TextHorAlign, vert: TextVertAlign) {
+    pub fn set_text_align(&mut self, hor: TextHorzAlign, vert: TextVertAlign) {
         let hor = hor.to_u32().unwrap_or_else(|| unsafe { unreachable_unchecked() });
         let vert = vert.to_u32().unwrap_or_else(|| unsafe { unreachable_unchecked() });
         let ok = unsafe { SetTextAlign(self.0.as_ptr(), hor | vert) };
