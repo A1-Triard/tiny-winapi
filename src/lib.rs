@@ -5,6 +5,7 @@ pub use winapi::shared::windef::COLORREF as COLORREF;
 pub use winapi::shared::windef::POINT as POINT;
 pub use winapi::shared::windef::RECT as RECT;
 pub use winapi::um::wingdi::RGB as RGB;
+pub use winapi::um::wingdi::TEXTMETRICW as TEXTMETRICW;
 
 #[doc(hidden)]
 pub use utf16_lit::utf16 as utf16_lit_utf16;
@@ -31,8 +32,7 @@ use winapi::shared::minwindef::{HINSTANCE__, HINSTANCE, UINT, WPARAM, LPARAM, LR
 use winapi::shared::windef::{HBRUSH, HWND, HWND__, HDC__, HPEN__, HPEN, HGDIOBJ, HBRUSH__};
 use winapi::um::libloaderapi::GetModuleHandleW;
 use winapi::um::playsoundapi::{PlaySoundW, SND_FILENAME, SND_ASYNC};
-use winapi::um::wingdi::{SetPixel, MoveToEx, LineTo, GetStockObject, WHITE_PEN, SelectObject, CreatePen, CreateSolidBrush, WHITE_BRUSH, TextOutW};
-use winapi::um::wingdi::{Rectangle, DeleteObject, PS_SOLID, PS_DOT, PS_DASHDOT, PS_DASHDOTDOT, PS_NULL, PS_INSIDEFRAME, PS_DASH};
+use winapi::um::wingdi::*;
 use winapi::um::winnt::LPCWSTR;
 use winapi::um::winuser::*;
 
@@ -68,6 +68,57 @@ impl<'a> Display for WStr<'a> {
     }
 }
 
+#[derive(Primitive)]
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Copy, Clone)]
+#[repr(i32)]
+pub enum SystemMetrics {
+    CXScreen = SM_CXSCREEN,
+    CYScreen = SM_CYSCREEN,
+    CXVScroll = SM_CXVSCROLL,
+    CYHScroll = SM_CYHSCROLL,
+    CYCaption = SM_CYCAPTION,
+    CXBorder = SM_CXBORDER,
+    CYBorder = SM_CYBORDER,
+    CXDlgFrame = SM_CXDLGFRAME,
+    CYDlgFrame = SM_CYDLGFRAME,
+    CYVThumb = SM_CYVTHUMB,
+    CXHThumb = SM_CXHTHUMB,
+    CXIcon = SM_CXICON,
+    CYIcon = SM_CYICON,
+    CXCursor = SM_CXCURSOR,
+    CYCursor = SM_CYCURSOR,
+    CYMenu = SM_CYMENU,
+    CXFullscreen = SM_CXFULLSCREEN,
+    CYFullscreen = SM_CYFULLSCREEN,
+    CYKanjiWindow = SM_CYKANJIWINDOW,
+    MousePresent = SM_MOUSEPRESENT,
+    CYVScroll = SM_CYVSCROLL,
+    CXHScroll = SM_CXHSCROLL,
+    Debug = SM_DEBUG,
+    SwapButton = SM_SWAPBUTTON,
+    Reserved1 = SM_RESERVED1,
+    Reserved2 = SM_RESERVED2,
+    Reserved3 = SM_RESERVED3,
+    Reserved4 = SM_RESERVED4,
+    CXMin = SM_CXMIN,
+    CYMin = SM_CYMIN,
+    CXSize = SM_CXSIZE,
+    CYSize = SM_CYSIZE,
+    CXFrame = SM_CXFRAME,
+    CYFrame = SM_CYFRAME,
+    CXMinTrack = SM_CXMINTRACK,
+    CYMinTrack = SM_CYMINTRACK,
+    CXDoubleClk = SM_CXDOUBLECLK,
+    CYDoubleClk = SM_CYDOUBLECLK,
+    CXIconSpacing = SM_CXICONSPACING,
+    CYIconSpacing = SM_CYICONSPACING,
+    MenuDropAlignment = SM_MENUDROPALIGNMENT,
+    PenWindows = SM_PENWINDOWS,
+    DbcsEnabled = SM_DBCSENABLED,
+    CMouseButtons = SM_CMOUSEBUTTONS,
+    ShowSounds = SM_SHOWSOUNDS,
+}
+
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct Instance(NonNull<HINSTANCE__>);
 
@@ -97,11 +148,14 @@ impl Instance {
         let ok = unsafe { PlaySoundW(file.as_ptr(), null_mut(), SND_FILENAME | SND_ASYNC ) };
         assert_ne!(ok, 0, "PlaySoundW failed")
     }
+
+    pub fn get_system_metrics(index: SystemMetrics) -> c_int {
+        unsafe { GetSystemMetrics(index.to_i32().unwrap_or_else(|| unreachable_unchecked() )) }
+    }
 }
 
 #[derive(Primitive)]
-#[derive(Ord, PartialOrd, Eq, PartialEq, Hash, Copy, Clone)]
-#[derive(Debug)]
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Copy, Clone)]
 #[repr(u32)]
 pub enum SystemColor {
     ActiveBorder = COLOR_ACTIVEBORDER as u32,
@@ -136,17 +190,17 @@ pub enum WindowBackground<'a> {
 pub type NonZero_ATOM = NonZero_c_ushort;
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct Class<'a> {
+pub struct Class<'i> {
     atom: NonZero_ATOM,
-    instance: &'a Instance,
+    instance: &'i Instance,
 }
 
-impl<'a> Class<'a> {
+impl<'i> Class<'i> {
     pub fn as_atom(&self) -> NonZero_ATOM { self.atom }
 
-    pub fn instance(&self) -> &'a Instance { self.instance }
+    pub fn instance(&self) -> &'i Instance { self.instance }
 
-    pub fn new(name: WStrZ, instance: &'a Instance, background: WindowBackground) -> io::Result<Class<'a>> {
+    pub fn new(name: WStrZ, instance: &'i Instance, background: WindowBackground) -> io::Result<Class<'i>> {
         let background = match background {
             WindowBackground::None => null_mut(),
             WindowBackground::System(color) => (color.to_u32().unwrap_or_else(|| unsafe { unreachable_unchecked() }) + 1) as HBRUSH,
@@ -171,7 +225,7 @@ impl<'a> Class<'a> {
     }
 }
 
-impl<'a> Drop for Class<'a> {
+impl<'i> Drop for Class<'i> {
     fn drop(&mut self) {
         let ok = unsafe { UnregisterClassW(self.atom.get() as usize as LPCWSTR, self.instance.as_handle().as_ptr()) };
         assert_ne!(ok, 0, "UnregisterClassW failed");
@@ -179,9 +233,7 @@ impl<'a> Drop for Class<'a> {
 }
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct DeviceContext {
-    h_dc: NonNull<HDC__>,
-}
+pub struct DeviceContext(NonNull<HDC__>);
 
 #[allow(non_camel_case_types)]
 type HGDIOBJ__ = winapi::ctypes::c_void;
@@ -190,71 +242,80 @@ pub unsafe trait GdiObject {
     fn h_gdi_obj(&self) -> NonNull<HGDIOBJ__>;
 }
 
-pub struct DeviceContextWithSelectedObject<'a, 'b> where 'a: 'b {
-    context: &'a mut DeviceContext,
-    object: PhantomData<&'b dyn GdiObject>,
+pub struct DeviceContextWithSelectedObject<'d, 'o> where 'd: 'o {
+    context: &'d mut DeviceContext,
+    object: PhantomData<&'o dyn GdiObject>,
     original: NonNull<HGDIOBJ__>,
 }
 
-impl<'a, 'b> Deref for DeviceContextWithSelectedObject<'a, 'b> {
+impl<'d, 'o> Deref for DeviceContextWithSelectedObject<'d, 'o> {
     type Target = DeviceContext;
 
     fn deref(&self) -> &DeviceContext { self.context }
 }
 
-impl<'a, 'b> DerefMut for DeviceContextWithSelectedObject<'a, 'b> {
+impl<'d, 'o> DerefMut for DeviceContextWithSelectedObject<'d, 'o> {
     fn deref_mut(&mut self) -> &mut DeviceContext { self.context }
 }
 
-impl<'a, 'b> Drop for DeviceContextWithSelectedObject<'a, 'b> {
+impl<'d, 'o> Drop for DeviceContextWithSelectedObject<'d, 'o> {
     fn drop(&mut self) {
-        let object = unsafe { SelectObject(self.context.h_dc.as_ptr(), self.original.as_ptr()) };
+        let object = unsafe { SelectObject(self.context.0.as_ptr(), self.original.as_ptr()) };
         assert_ne!(object, null_mut(), "SelectObject failed");
     }
 }
 
 impl DeviceContext {
     pub fn set_pixel(&mut self, x: c_int, y: c_int, color: COLORREF) -> Option<COLORREF> {
-        let res = unsafe { SetPixel(self.h_dc.as_ptr(), x, y, color) };
+        let res = unsafe { SetPixel(self.0.as_ptr(), x, y, color) };
         if res == u32::MAX { None } else { Some(res) }
     }
 
     pub fn move_to_ex(&mut self, x: c_int, y: c_int) -> POINT {
         let mut res = MaybeUninit::uninit();
-        let ok = unsafe { MoveToEx(self.h_dc.as_ptr(), x, y, res.as_mut_ptr()) };
+        let ok = unsafe { MoveToEx(self.0.as_ptr(), x, y, res.as_mut_ptr()) };
         assert_ne!(ok, 0, "MoveToEx failed");
         unsafe { res.assume_init() }
     }
 
     pub fn line_to(&mut self, x: c_int, y: c_int) {
-        let ok = unsafe { LineTo(self.h_dc.as_ptr(), x, y) };
+        let ok = unsafe { LineTo(self.0.as_ptr(), x, y) };
         assert_ne!(ok, 0, "LineTo failed");
     }
 
     pub fn rectangle(&mut self, left: c_int, top: c_int, right: c_int, bottom: c_int) {
-        let ok = unsafe { Rectangle(self.h_dc.as_ptr(), left, top, right, bottom) };
+        let ok = unsafe { Rectangle(self.0.as_ptr(), left, top, right, bottom) };
         assert_ne!(ok, 0, "Rectangle failed");
     }
 
     pub fn select_object<'a, 'b>(&'a mut self, object: &'b dyn GdiObject) -> DeviceContextWithSelectedObject<'a, 'b> {
-        let original = unsafe { SelectObject(self.h_dc.as_ptr(), object.h_gdi_obj().as_ptr() as HGDIOBJ) };
+        let original = unsafe { SelectObject(self.0.as_ptr(), object.h_gdi_obj().as_ptr() as HGDIOBJ) };
         let original = NonNull::new(original).expect("SelectObject failed");
         DeviceContextWithSelectedObject { context: self, object: PhantomData, original }
     }
 
     pub fn draw_text(&mut self, text: WStr, rect: &RECT) {
-        let ok = unsafe { DrawTextW(self.h_dc.as_ptr(), text.as_ptr(), text.len().try_into().expect("Too long text"), rect as *const _ as *mut _, DT_SINGLELINE | DT_CENTER | DT_VCENTER) };
+        let ok = unsafe { DrawTextW(self.0.as_ptr(), text.as_ptr(), text.len().try_into().expect("Too long text"), rect as *const _ as *mut _, DT_SINGLELINE | DT_CENTER | DT_VCENTER) };
         assert_ne!(ok, 0, "DrawTextW failed");
     }
 
     pub fn text_out(&mut self, x: c_int, y: c_int, text: WStr) {
-        let ok = unsafe { TextOutW(self.h_dc.as_ptr(), x, y, text.as_ptr(), text.len().try_into().expect("Too long text")) };
+        let ok = unsafe { TextOutW(self.0.as_ptr(), x, y, text.as_ptr(), text.len().try_into().expect("Too long text")) };
         assert_ne!(ok, 0, "TextOutW failed");
+    }
+
+    pub fn get_text_metrics(&self) -> TEXTMETRICW {
+        let mut tm = MaybeUninit::uninit();
+        let ok = unsafe { GetTextMetricsW(self.0.as_ptr(), tm.as_mut_ptr()) };
+        assert_ne!(ok, 0, "GetTextMetricsW failed");
+        unsafe { tm.assume_init() }
     }
 }
 
+pub type GetDC = dyn for<'w, 'c, 'i> Fn(&'w Window<'c, 'i>) -> WindowDeviceContext<'w, 'c, 'i>;
+
 pub trait WindowProc {
-    fn create(&self, _window: &Window) { }
+    fn create(&self, _window: &Window, _get_dc: &GetDC) { }
     fn destroy(&self, _window: &Window, handled: &mut bool) { *handled = false; }
     fn paint(&self, _window: &Window, _dc: &mut DeviceContext, _rect: RECT) { }
 }
@@ -263,18 +324,18 @@ impl WindowProc for () { }
 
 #[derive(Educe)]
 #[educe(Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct Window<'a, 'b> {
+pub struct Window<'c, 'i> {
     h_wnd: NonNull<HWND__>,
     #[educe(PartialOrd(ignore), Ord(ignore), PartialEq(ignore), Eq(ignore), Hash(ignore))]
-    class: &'a Class<'b>
+    class: &'c Class<'i>
 }
 
-impl<'a, 'b> Window<'a, 'b> {
+impl<'c, 'i> Window<'c, 'i> {
     pub fn as_h_wnd(&self) -> NonNull<HWND__> { self.h_wnd }
 
-    pub fn class(&self) -> &'a Class<'b> { self.class }
+    pub fn class(&self) -> &'c Class<'i> { self.class }
 
-    pub fn new(name: WStrZ, class: &'a Class<'b>, w_proc: Box<dyn WindowProc>) -> io::Result<Window<'a, 'b>> {
+    pub fn new(name: WStrZ, class: &'c Class<'i>, w_proc: Box<dyn WindowProc>) -> io::Result<Window<'c, 'i>> {
         let h_wnd = unsafe { CreateWindowExW(
             0,
             class.as_atom().get() as usize as LPCWSTR,
@@ -306,13 +367,40 @@ impl<'a, 'b> Window<'a, 'b> {
     }
 }
 
-impl<'a, 'b> Drop for Window<'a, 'b> {
+impl<'c, 'i> Drop for Window<'c, 'i> {
     fn drop(&mut self) {
         let w_proc = unsafe { GetWindowLongPtrW(self.h_wnd.as_ptr(), GWLP_USERDATA) as *mut Box<dyn WindowProc> };
         let ok = unsafe { DestroyWindow(self.h_wnd.as_ptr()) };
         assert_ne!(ok, 0, "DestroyWindow failed");
         unsafe { Box::from_raw(w_proc) };
     }
+}
+
+pub struct WindowDeviceContext<'w, 'c, 'i> {
+    context: DeviceContext,
+    window: &'w Window<'c, 'i>
+}
+
+impl<'w, 'c, 'i> Deref for WindowDeviceContext<'w, 'c, 'i> {
+    type Target = DeviceContext;
+
+    fn deref(&self) -> &DeviceContext { &self.context }
+}
+
+impl<'w, 'c, 'i> DerefMut for WindowDeviceContext<'w, 'c, 'i> {
+    fn deref_mut(&mut self) -> &mut DeviceContext { &mut self.context }
+}
+
+impl<'w, 'c, 'i> Drop for WindowDeviceContext<'w, 'c, 'i> {
+    fn drop(&mut self) {
+        let ok = unsafe { ReleaseDC(self.window.h_wnd.as_ptr(), self.context.0.as_ptr()) };
+        assert_ne!(ok, 0, "ReleaseDC failed");
+    }
+}
+
+fn get_dc<'w, 'c, 'i>(window: &'w Window<'c, 'i>) -> WindowDeviceContext<'w, 'c, 'i> {
+    let context = NonNull::new(unsafe { GetDC(window.h_wnd.as_ptr()) }).expect("GetDC failed");
+    WindowDeviceContext { window, context: DeviceContext(context) }
 }
 
 unsafe extern "system" fn wnd_proc(h_wnd: HWND, message: UINT, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
@@ -332,7 +420,7 @@ unsafe extern "system" fn wnd_proc(h_wnd: HWND, message: UINT, w_param: WPARAM, 
         let window = ManuallyDrop::new(Window { class: &class, h_wnd });
         match message {
             WM_CREATE => {
-                w_proc.create(&window);
+                w_proc.create(&window, &get_dc);
                 return 0;
             }
             WM_DESTROY => {
@@ -345,7 +433,7 @@ unsafe extern "system" fn wnd_proc(h_wnd: HWND, message: UINT, w_param: WPARAM, 
                 let ok = BeginPaint(h_wnd.as_ptr(), ps.as_mut_ptr());
                 assert_ne!(ok, null_mut(), "BeginPaint failed");
                 let ps = ps.assume_init();
-                w_proc.paint(&window, &mut DeviceContext { h_dc: NonNull::new_unchecked(ps.hdc) }, ps.rcPaint);
+                w_proc.paint(&window, &mut DeviceContext(NonNull::new_unchecked(ps.hdc)), ps.rcPaint);
                 EndPaint(h_wnd.as_ptr(), &ps as *const _);
                 return 0;
             },
