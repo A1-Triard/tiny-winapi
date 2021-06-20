@@ -1,4 +1,5 @@
 #![feature(raw_os_nonzero)]
+#![feature(const_fn_transmute)]
 #![deny(warnings)]
 
 pub use winapi::shared::windef::COLORREF as COLORREF;
@@ -35,37 +36,100 @@ use winapi::um::playsoundapi::{PlaySoundW, SND_FILENAME, SND_ASYNC};
 use winapi::um::wingdi::*;
 use winapi::um::winnt::LPCWSTR;
 use winapi::um::winuser::*;
+use std::iter::FromIterator;
 
-#[derive(Clone, Copy, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct WStrZ<'a>(pub &'a Nul<u16>);
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+pub struct WStrZ(Nul<u16>);
 
-impl<'a> WStrZ<'a> {
-    pub fn as_ptr(self) -> *const u16 { self.0.as_ptr() }
+impl WStrZ {
+    pub const fn from(nul: &Nul<u16>) -> &WStrZ { unsafe { transmute(nul) } }
 
-    pub fn len(self) -> usize { self.0.len() }
+    pub const fn as_ptr(&self) -> *const u16 { self.0.as_ptr() }
 
-    pub fn as_w_str(self) -> WStr<'a> { WStr(&self.0[..]) }
+    pub fn len(&self) -> usize { self.0.len() }
+
+    pub fn as_w_str(&self) -> &WStr { (&self.0[..]).into() }
 }
 
-impl<'a> Display for WStrZ<'a> {
+impl<'a> From<&'a Nul<u16>> for &'a WStrZ {
+    fn from(nul: &'a Nul<u16>) -> &'a WStrZ { unsafe { transmute(nul) } }
+}
+
+impl AsRef<WStrZ> for WStrZ {
+    fn as_ref(&self) -> &WStrZ { self }
+}
+
+impl AsRef<Nul<u16>> for WStrZ {
+    fn as_ref(&self) -> &Nul<u16> { &self.0 }
+}
+
+impl Display for WStrZ {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         String::from_utf16_lossy(&self.0[..]).fmt(f)
     }
 }
 
-#[derive(Clone, Copy, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct WStr<'a>(pub &'a [u16]);
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+pub struct WStr([u16]);
 
-impl<'a> WStr<'a> {
-    pub fn as_ptr(self) -> *const u16 { self.0.as_ptr() }
+impl WStr {
+    pub const fn from(slice: &[u16]) -> &WStr { unsafe { transmute(slice) } }
 
-    pub fn len(self) -> usize { self.0.len() }
+    pub const fn as_ptr(&self) -> *const u16 { self.0.as_ptr() }
+
+    pub const fn len(&self) -> usize { self.0.len() }
 }
 
-impl<'a> Display for WStr<'a> {
+impl<'a> From<&'a [u16]> for &'a WStr {
+    fn from(slice: &'a [u16]) -> &'a WStr { unsafe { transmute(slice) } }
+}
+
+impl AsRef<WStr> for WStr {
+    fn as_ref(&self) -> &WStr { self }
+}
+
+impl AsRef<[u16]> for WStr {
+    fn as_ref(&self) -> &[u16] { &self.0 }
+}
+
+impl Display for WStr {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        String::from_utf16_lossy(self.0).fmt(f)
+        String::from_utf16_lossy(&self.0).fmt(f)
     }
+}
+
+#[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+pub struct WString(Vec<u16>);
+
+impl<'a> From<&'a WStr> for WString {
+    fn from(str: &'a WStr) -> WString { WString(Vec::from(str.as_ref())) }
+}
+
+impl From<Vec<u16>> for WString {
+    fn from(vec: Vec<u16>) -> WString { WString(vec) }
+}
+
+impl Into<Vec<u16>> for WString {
+    fn into(self) -> Vec<u16> { self.0 }
+}
+
+impl AsRef<WStr> for WString {
+    fn as_ref(&self) -> &WStr { (&self.0[..]).into() }
+}
+
+impl Display for WString {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let s: &WStr = self.as_ref();
+        s.fmt(f)
+    }
+}
+
+impl FromIterator<u16> for WString {
+    fn from_iter<I: IntoIterator<Item=u16>>(iter: I) -> WString { iter.into_iter().collect::<Vec<u16>>().into() }
+}
+
+impl<'a> FromIterator<&'a u16> for WString {
+    fn from_iter<I: IntoIterator<Item=&'a u16>>(iter: I) -> WString { iter.into_iter().copied().collect::<Vec<u16>>().into() }
 }
 
 #[derive(Primitive)]
@@ -144,7 +208,7 @@ impl Instance {
         unsafe { PostQuitMessage(exit_code) }
     }
 
-    pub fn play_sound(file: WStrZ) {
+    pub fn play_sound(file: &WStrZ) {
         let ok = unsafe { PlaySoundW(file.as_ptr(), null_mut(), SND_FILENAME | SND_ASYNC ) };
         assert_ne!(ok, 0, "PlaySoundW failed")
     }
@@ -200,7 +264,7 @@ impl<'i> Class<'i> {
 
     pub fn instance(&self) -> &'i Instance { self.instance }
 
-    pub fn new(name: WStrZ, instance: &'i Instance, background: WindowBackground) -> io::Result<Class<'i>> {
+    pub fn new(name: impl AsRef<WStrZ>, instance: &'i Instance, background: WindowBackground) -> io::Result<Class<'i>> {
         let background = match background {
             WindowBackground::None => null_mut(),
             WindowBackground::System(color) => (color.to_u32().unwrap_or_else(|| unsafe { unreachable_unchecked() }) + 1) as HBRUSH,
@@ -217,7 +281,7 @@ impl<'i> Class<'i> {
             hCursor: unsafe { LoadCursorW(null_mut(), IDC_ARROW) },
             hbrBackground: background,
             lpszMenuName: null(),
-            lpszClassName: name.as_ptr(),
+            lpszClassName: name.as_ref().as_ptr(),
             lpfnWndProc: Some(wnd_proc)
         };
         let atom = NonZero_ATOM::new(unsafe { RegisterClassExW(&wnd_class as *const _) }).ok_or_else(io::Error::last_os_error)?;
@@ -312,12 +376,14 @@ impl DeviceContext {
         DeviceContextWithSelectedObject { context: self, object: PhantomData, original }
     }
 
-    pub fn draw_text(&mut self, text: WStr, rect: &RECT) {
+    pub fn draw_text(&mut self, text: impl AsRef<WStr>, rect: &RECT) {
+        let text = text.as_ref();
         let ok = unsafe { DrawTextW(self.0.as_ptr(), text.as_ptr(), text.len().try_into().expect("Too long text"), rect as *const _ as *mut _, DT_SINGLELINE | DT_CENTER | DT_VCENTER) };
         assert_ne!(ok, 0, "DrawTextW failed");
     }
 
-    pub fn text_out(&mut self, x: c_int, y: c_int, text: WStr) {
+    pub fn text_out(&mut self, x: c_int, y: c_int, text: impl AsRef<WStr>) {
+        let text = text.as_ref();
         let ok = unsafe { TextOutW(self.0.as_ptr(), x, y, text.as_ptr(), text.len().try_into().expect("Too long text")) };
         assert_ne!(ok, 0, "TextOutW failed");
     }
@@ -360,11 +426,11 @@ impl<'c, 'i> Window<'c, 'i> {
 
     pub fn class(&self) -> &'c Class<'i> { self.class }
 
-    pub fn new(name: WStrZ, class: &'c Class<'i>, w_proc: Box<dyn WindowProc>) -> io::Result<Window<'c, 'i>> {
+    pub fn new(name: impl AsRef<WStrZ>, class: &'c Class<'i>, w_proc: Box<dyn WindowProc>) -> io::Result<Window<'c, 'i>> {
         let h_wnd = unsafe { CreateWindowExW(
             0,
             class.as_atom().get() as usize as LPCWSTR,
-            name.as_ptr(),
+            name.as_ref().as_ptr(),
             WS_OVERLAPPEDWINDOW,
             CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
             HWND_DESKTOP,
@@ -539,7 +605,7 @@ impl Stock {
 #[macro_export]
 macro_rules! w_str_z {
     ($($tokens:tt)*) => {
-        $crate::WStrZ(unsafe {
+        $crate::WStrZ::from(unsafe {
             $crate::null_terminated_Nul::new_unchecked(
                 &$crate::utf16_lit_utf16_null!($($tokens)*) as *const _
             )
@@ -550,8 +616,8 @@ macro_rules! w_str_z {
 #[macro_export]
 macro_rules! w_str {
     ($($tokens:tt)*) => {
-        $crate::WStr(unsafe {
+        $crate::WStr::from(
             &$crate::utf16_lit_utf16!($($tokens)*)
-        })
+        )
     };
 }
