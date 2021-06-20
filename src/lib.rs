@@ -232,6 +232,24 @@ impl<'i> Drop for Class<'i> {
     }
 }
 
+#[derive(Primitive)]
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Copy, Clone)]
+#[repr(u32)]
+pub enum TextVertAlign {
+    Baseline = TA_BASELINE,
+    Bottom = TA_BOTTOM,
+    Top = TA_TOP,
+}
+
+#[derive(Primitive)]
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Copy, Clone)]
+#[repr(u32)]
+pub enum TextHorAlign {
+    Center = TA_CENTER,
+    Left = TA_LEFT,
+    Right = TA_RIGHT,
+}
+
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct DeviceContext(NonNull<HDC__>);
 
@@ -309,6 +327,13 @@ impl DeviceContext {
         let ok = unsafe { GetTextMetricsW(self.0.as_ptr(), tm.as_mut_ptr()) };
         assert_ne!(ok, 0, "GetTextMetricsW failed");
         unsafe { tm.assume_init() }
+    }
+
+    pub fn set_text_align(&mut self, hor: TextHorAlign, vert: TextVertAlign) {
+        let hor = hor.to_u32().unwrap_or_else(|| unsafe { unreachable_unchecked() });
+        let vert = vert.to_u32().unwrap_or_else(|| unsafe { unreachable_unchecked() });
+        let ok = unsafe { SetTextAlign(self.0.as_ptr(), hor | vert) };
+        assert_ne!(ok, 0, "SetTextAlign failed");
     }
 }
 
