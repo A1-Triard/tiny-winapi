@@ -19,6 +19,7 @@ use educe::Educe;
 use enum_primitive_derive::Primitive;
 use null_terminated::Nul;
 use num_traits::ToPrimitive;
+use sealed::sealed;
 use std::convert::TryInto;
 use std::fmt::{self, Display, Formatter};
 use std::hint::unreachable_unchecked;
@@ -320,7 +321,8 @@ pub struct DeviceContext(NonNull<HDC__>);
 #[allow(non_camel_case_types)]
 type HGDIOBJ__ = winapi::ctypes::c_void;
 
-pub unsafe trait GdiObject {
+#[sealed]
+pub trait GdiObject {
     fn h_gdi_obj(&self) -> NonNull<HGDIOBJ__>;
 }
 
@@ -528,7 +530,7 @@ unsafe extern "system" fn wnd_proc(h_wnd: HWND, message: UINT, w_param: WPARAM, 
                 EndPaint(h_wnd.as_ptr(), &ps as *const _);
                 return 0;
             },
-            _ => {},
+            _ => { },
         }
     }
     DefWindowProcW(h_wnd.as_ptr(), message, w_param, l_param)
@@ -544,7 +546,8 @@ impl Drop for Brush {
     }
 }
 
-unsafe impl GdiObject for Brush {
+#[sealed]
+impl GdiObject for Brush {
     fn h_gdi_obj(&self) -> NonNull<HGDIOBJ__> { unsafe { transmute(self.0) } }
 }
 
@@ -565,7 +568,8 @@ impl Drop for Pen {
     }
 }
 
-unsafe impl GdiObject for Pen {
+#[sealed]
+impl GdiObject for Pen {
     fn h_gdi_obj(&self) -> NonNull<HGDIOBJ__> { unsafe { transmute(self.0) } }
 }
 
